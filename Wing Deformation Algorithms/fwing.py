@@ -12,7 +12,7 @@ from scipy.fft import idct as idct
 from scipy.fft import dst as dst
 from scipy.fft import idst as idst
 import scipy.special
-from scipy.sparse.linalg import gmres,LinearOperator
+from scipy.sparse.linalg import gmres,minres,LinearOperator
 from numpy.polynomial.chebyshev import chebval as chebval
 from scipy.integrate import trapz
 
@@ -22,7 +22,7 @@ def fct(f):
 #     INPUT: Function evauluated at callocation points
 #     OUTPUT: Chebyshev coefficients  
 #==============================================================================
-    ##Calculate chebyshev coefficients with DCT
+    ##Calculate chebyshev coefficients with DCT4
     b = dct(f)/(len(f))
     ##Correct to coincide with Moore 2017
     b[0] = b[0]/2
@@ -45,7 +45,6 @@ def ifct(f):
     #f[0] = f[0]*2
     #F = idct(f)*len(f)
     F = chebval(x,f)
-    print('i')
     return F
 
 #%% fst
@@ -79,7 +78,7 @@ def Theodorsen(sigma):
 #     INPUT: reduced frequency sigma
 #     OUTPUT: Theodorsen function evaluated at sigma
 #==============================================================================
-    C_sigma = scipy.special.kv(1,1j*sigma)/(scipy.special.kv(0,1j*sigma)+(scipy.special.kv(1,1j*sigma)))
+    C_sigma = scipy.special.kv(1,1j*sigma)/(scipy.special.kv(0,1j*sigma)+scipy.special.kv(1,1j*sigma))
     return C_sigma
 
 #%% cheb_diff
@@ -97,7 +96,6 @@ def cheb_diff(b):
     bp = np.delete(bp,len(bp)-1,0)
     bp = bp.reshape(len(b),)
 
-    
     return bp
 
 #%% algorithm1
@@ -124,7 +122,6 @@ def algorithm1(b,x_end):
         
     D_1g = D_1g + B[0]/2 #sum prime notation
     
-
     B[0] = B[0] - D_1g 
         
     f = np.zeros((N,)) + 1j*np.zeros((N,))
@@ -157,33 +154,36 @@ def algorithm2(eta_trial,eta_singular,alpha,beta,U,sigma):
 #     INPUT: N+1 chebyshev coefficients of the trial kinematics (eta_trial) and eta_singular, and alpha and beta
 #     OUTPUT: The operator L applied to the trial kinematics (eta_trial)
 #==============================================================================
+    D_m1_eta_trial =np.zeros((len(eta_trial),)) + 1j*np.zeros((len(eta_trial),))
+    D_m1_eta_trial[1] = eta_trial[0] - eta_trial[2]/2
+
+    for k in np.arange(2,len(eta_trial)-1,1):
+        D_m1_eta_trial[k] = (1/(2*k))*(eta_trial[k-1]-eta_trial[k+1])
     #1 Evaluate eq(26) for d/dx (Psi)
-    aa = 4*np.pi**2 * eta_trial
-    bb = (- 4*np.pi*1j*U*cheb_diff(eta_trial)).reshape(len(eta_trial),)
-    cc = (- U**2 * cheb_diff(cheb_diff(eta_trial))).reshape(len(eta_trial),)
-    DPsi = aa + bb + cc
-    Psi = np.zeros((len(DPsi),)) + 1j*np.zeros((len(DPsi),))
+    aa = 4*np.pi**2 * D_m1_eta_trial
+    bb = (- 4*np.pi*1j*U*(eta_trial)).reshape(len(eta_trial),)
+    cc = (- U**2 * (cheb_diff(eta_trial))).reshape(len(eta_trial),)
+    Psi = aa + bb + cc
+    # Psi = np.zeros((len(DPsi),)) + 1j*np.zeros((len(DPsi),))
     
-    Psi[1] = DPsi[0] - DPsi[2]/2
-    #Integrate DPsi once to solve for a_k, k = 1,...,N. We can't find a_0 yet (constant of integration)
-    for k in np.arange(2,len(DPsi)-1,1):
-        Psi[k] = (1/(2*k))*(DPsi[k-1]-DPsi[k+1])
-    
-        
-    
+    # Psi[1] = DPsi[0] - DPsi[2]/2
+    # #Integrate DPsi once to solve for a_k, k = 1,...,N. We can't find a_0 yet (constant of integration)
+    # for k in np.arange(2,len(DPsi)-1,1):
+    #     Psi[k] = (1/(2*k))*(DPsi[k-1]-DPsi[k+1])
     
     a_k = Psi #get the coefficients a_k
      
-    Q_r = fst(a_k).reshape(len(eta_trial),) #Compute the regular part of the hydrodynamic load with the ifst from a_k's
+    Q_r = ifst(a_k).reshape(len(eta_trial),) #Compute the regular part of the hydrodynamic load with the ifst from a_k's
     eta_trial = ifct(eta_trial) #4: transform back to physical space from spectral space
-    
+
+        
     beta_eta_Q_r = beta*eta_trial + Q_r
     
-    P_m1_beta_eta_Q_r = fct(beta_eta_Q_r)
-    P_m1_beta_eta_Q_r = algorithm1(P_m1_beta_eta_Q_r,1)
-    P_m1_beta_eta_Q_r = ifct(P_m1_beta_eta_Q_r)/alpha
-    P_m1_beta_eta_Q_r = fct(P_m1_beta_eta_Q_r)
-    P_m1_beta_eta_Q_r = algorithm1(P_m1_beta_eta_Q_r,-1)
+    P_m1_beta_eta_Q_r_0 = fct(beta_eta_Q_r)
+    P_m1_beta_eta_Q_r_1 = algorithm1(P_m1_beta_eta_Q_r_0,1) #apply algorithm 1
+    P_m1_beta_eta_Q_r_2 = ifct(P_m1_beta_eta_Q_r_1)/alpha #transform to physical space and dicide by alpha
+    P_m1_beta_eta_Q_r_3 = fct(P_m1_beta_eta_Q_r_2) #transform back to spectral space
+    P_m1_beta_eta_Q_r_4 = algorithm1(P_m1_beta_eta_Q_r_3,-1) #apply algorithm 1 once more
    # P_m1_beta_eta_Q_r = algorithm1(fct(ifct(algorithm1(fct(beta_eta_Q_r),1))/alpha),-1) #Transform back to spectral space and apply algorithm1 with x_end = 1, then transform to physical space and divide by alpha and then apply algorithm1 again, but with x_end = -1
     
     eta_trial = fct(eta_trial) #transform back to spectral space
@@ -191,10 +191,8 @@ def algorithm2(eta_trial,eta_singular,alpha,beta,U,sigma):
     V_hat = (2*np.pi*1j * eta_trial + U * cheb_diff(eta_trial)) #compute V(x) from eq(29)
     a_0 = -U*Theodorsen(sigma)*(V_hat[0]+V_hat[1]) + U * V_hat[1]
     
-    
-
     #eta_s = np.transpose(np.array(fct(eta_singular),ndmin = 2))
-    l_eta = eta_trial.reshape(len(eta_trial),) - a_0*eta_singular.reshape(len(eta_singular),) - P_m1_beta_eta_Q_r.reshape(len(eta_trial),) #build the final vector L[eta_trial]
+    l_eta = eta_trial.reshape(len(eta_trial),) - a_0*eta_singular.reshape(len(eta_singular),) - P_m1_beta_eta_Q_r_4.reshape(len(eta_trial),) #build the final vector L[eta_trial]
     
     return l_eta
 
@@ -204,34 +202,20 @@ def L_eta_func(eta_trial):
     N = 1001
     n = np.arange(0,N,1)
     theta = np.pi*(2*n+1)/((2*(N)))
-    x = np.cos(theta)	
-    b = 1
-    c = 1
-    rho = 1
-    U_inf = 1#4*np.pi**2
-    
+    x = np.cos(theta)
+    t = np.linspace(0,1,N)
+    omega = 1
+    b = np.exp(2*np.pi*1j*omega**t)
+
     R = 1
-    f = np.pi*2
-    E = 20
     beta = 8*np.pi**2*R
-    S =15#E*b**3/(rho*U_inf**2*c**3)
-    sigma =1.5 # np.pi*c*f/U_inf
+    S = 20
+    sigma = 0.5 # np.pi*c*f/U_inf
     alpha = S*8*np.pi**2/(3*sigma**2)
     U = 2*np.pi/sigma
 
     DDeta_singular = (1/(2*alpha))*((2+x)*np.sqrt(1-x**2)-(1+2*x)*np.arccos(x))
     eta_singular = algorithm1(fct(DDeta_singular),-1)
+    
     L_eta = algorithm2(eta_trial,eta_singular,alpha,beta,U,sigma)
-    
     return L_eta.reshape(N,)
-#%% algorithm3
-def algorithm3(eta_le,eta_le_p,tol,x,eta_trial):
-    
-    Lambda = ((eta_le + eta_le_p*x + eta_le_p*x/x + 1j*0*x).reshape(len(x),))
-    Lambda = fct(Lambda)
-    #capL = aslinearoperator(algorithm2(eta_trial,eta_singular,alpha,beta))
-    L = LinearOperator((1001,1001), matvec = L_eta_func)
-
-    eta = gmres(L,Lambda,tol)
-    
-    return eta
