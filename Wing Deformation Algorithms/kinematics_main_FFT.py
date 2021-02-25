@@ -6,7 +6,7 @@ Created on Thu Jan 21 23:04:26 2021
 """
 
 import numpy as np
-from fwing_FFT import fct, ifct, L_eta_func
+import fwing_FFT as f
 from scipy.sparse.linalg import gmres,LinearOperator
 import matplotlib.pyplot as plt
 from scipy.fft import dct, idct, dst, idst, fftn, ifftn,fftfreq,fftshift
@@ -22,7 +22,7 @@ class gmres_counter(object):
 
 #%%
 #Define the needed parameters and discrete domain (-1,1)
-N = 1001
+N = 100
 n = np.arange(0,N,1)
 theta = np.pi*(2*n+1)/((2*(N)))
 x = np.cos(theta)
@@ -34,16 +34,15 @@ tol = 1e-12
 #%%
 #Now we want to use algorithm3 to evaluate the nonlocal operator script(L) using GMRES to find eta
 ##NEW STUFF
-w_trial = np.zeros
-w_hat_trial = fftn(w_trial,axis = 0) #expanding the fourier series in time along the rows of the matrix for each value x
-w_hat_trial = w_hat_trial[:,x_val] #working only on one specific x-value along the chord. Then we iterate this function for each
 Lambda = (eta_le + eta_le_p*(x+1))
-Lambda = fct(Lambda)
+Lambda = f.fct(Lambda)
+lambda_hat_n = np.zeros([N*N,])
+lambda_hat_n[((int(N*N/2))):(int(N*N/2+N))] = Lambda
 Lambda[Lambda < tol] = 0
-L = LinearOperator((N,N), matvec = L_eta_func)
+L = LinearOperator((N,N), matvec = f.linoperator)
 counter = gmres_counter()
 
-w_hat = gmres(L,Lambda,tol = tol ,maxiter = 100,x0 = fct(x), callback = counter)
+w_hat = gmres(L,Lambda,tol = tol ,maxiter = 100, callback = counter)
 #%%
 plt.plot(x,ifct(eta[0].real))
 #plt.ylim(0.9,1.2)

@@ -234,9 +234,8 @@ def cv(alpha_hat,w_hat):
         w_hat_convolved = np.append(w_hat_convolved,c)
     return w_hat_convolved
 #%% Solve equation (23) for each fixed frequency n (in spectral space)
-def eq23(w_hat_trial,U): #Expect input to be in matrix form initially (N by K)
-    N = len(w_hat_trial[1,:])
-    K = len(w_hat_trial[:,1])
+def eq23(w_hat_trial,U,N): #Expect input to be in matrix form initially (N by K)
+    w_hat_trial = w_hat_trial.reshape([10,10])
     Psi = [] #in spectral space
     for n in np.arange(0,N):
         D_m1_w_hat_trial = np.zeros((len(w_hat_trial[n,:]),)) + 1j*np.zeros((len(w_hat_trial[n,:]),)) #define an empty array to hold the first antiderivative of w_hat_n
@@ -256,17 +255,57 @@ def compute_Q_r(a_k_n):
     q_n_hat_r = []
     #First we must take the Fourier coefficients of the a_k's (as in eq (13)) and convert them back to an array of a_k using the inverse fast Fourier transform
     for n in np.arange(0,N):
-        q_n_hat = ifst(a_k_n[:,n]) #Take the nth column of a_k_n, and perform the ifst to find the nth Fourier coefficient, q_n_hat, of the hydrodynamic load
+        q_n_hat = ifst(a_k_n[n,:]) #Take the nth column of a_k_n, and perform the ifst to find the nth Fourier coefficient, q_n_hat, of the hydrodynamic load
         q_n_hat_r = np.append(q_n_hat_r,q_n_hat) #flattened matrix of the regular part of the load
 
-    return q_n_hat_r #in spectral space
-#%% Next we apply the preconditioner to the rightmost two terms of eq (30)
-def precondition(q_n_hat_r,w_hat_trial,mu): #q in spectral, w_hat in physical
+    return q_n_hat_r.reshape([N,N]) #in spectral space. Each row is the Fourier coefficent q_n_hat_r
+#%% Next we apply the preconditioner to the leftmost two terms of eq (30)
+def precondition(q_n_hat_r,w_hat_trial,mu): #q in spectral, w_hat in spectral
     N = len(w_hat_trial[1,:])
     mu_n_2_w_hat_trial = []
     preconditioned = []
     for n in np.arange(0,N):
-        mu_n_2_w_hat_trial_n = mu*n**2*w_hat_trial[n,:] #multiply in physical space
-        mu_n_2_w_hat_trial = np.append(mu_n_2_w_hat_trial,fct(mu_n_2_w_hat_trial_n)) #convert to spectral space and append
-    q_plus_w = q_n_hat_r + mu_n_2_w_hat_trial #add the two terms in the preconditioner's argument
-    return preconditioned
+        mu_n_2_w_hat_trial_n = mu*n**2*w_hat_trial[n,:] #multiply in spectral space
+        mu_n_2_w_hat_trial = np.append(mu_n_2_w_hat_trial,mu_n_2_w_hat_trial_n) #append
+    q_plus_w = q_n_hat_r + mu_n_2_w_hat_trial.reshape([N,N]) #add the two terms in the preconditioner's argument
+    for n in np.arange(0,N):
+        p_m1 = algorithm1(q_plus_w[n,:],1)
+        p_m2 = algorithm1(p_m1,-1)
+        preconditioned = np.append(preconditioned, p_m2)
+    return preconditioned.reshape([N,N])
+#%% operator construction
+def linoperator(w_hat_trial):
+
+    N = 100
+    n = np.arange(0,N,1)
+    theta = np.pi*(2*n+1)/((2*(N)))
+    x = np.cos(theta)
+    U = 1
+    mu = 1
+    sigma = 1.5
+    t = np.linspace(0,1,N)
+    alpha = np.exp(2*np.pi*t)
+    alpha_hat = fftshift(fft(alpha)/N)
+    term1 = eq23(w_hat_trial,U,N)
+    Q_r = compute_Q_r(term1) #computed the regular part of the hydrodynamic load in spectral space
+    D2_w_s = 0.5*((2+x)*np.sqrt(1-x**2) - (1+2*x)*np.arccos(x)) #define the semianalytical, de-singularized load
+    D2_w_s = fct(D2_w_s) #convert to spectral space
+    D_w_s = algorithm1(D2_w_s,-1)
+    w_s = algorithm1(D_w_s,-1) #precompute singular part of hydrodynamic load
+    
+    #Now we compute the a_0,n values
+    
+    q_s = [] #Define an empty array to hold values
+    
+    for n in np.arange(-N/2,N/2):
+        vhat_n = 1j*n * w_hat_trial[n,:] + U*cheb_diff(w_hat_trial)
+        a_hat_0_n = -U*Theodorsen(n*sigma)*(vhat_n[0] +vhat_n[1]) + U*vhat_n[1]
+        q_s_n = a_hat_0_n*w_s*1/2 #compute the first term in eq(18)
+        q_s = np.append(q_s,q_s_n)
+        
+    tp = precondition(Q_r, w_hat_trial, mu)
+    alpha_w_hat_trial = cv(alpha_hat,w_hat_trial)
+    
+    L = alpha_w_hat_trial - q_s - tp #construct the final operator
+    
+    return L
